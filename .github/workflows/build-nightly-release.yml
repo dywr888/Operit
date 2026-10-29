@@ -181,6 +181,7 @@ jobs:
           chmod +x ./gradlew
           ./gradlew :app:assembleNightly \
             -x lintVitalNightly \
+            -x signRotatedNightlyApk \
             --stacktrace --no-daemon
 
       - name: Upload Android reports
