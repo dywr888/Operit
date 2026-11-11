@@ -787,7 +787,7 @@ class ChatHistoryDelegate(
             // 获取当前对话ID，以便继承分组
             val currentChatId = _currentChatId.value
             val inheritGroupFromChatId = if (inheritGroupFromCurrent) currentChatId else null
-            
+
             // 获取当前活跃的角色卡
             val activePrompt = activePromptManager.getActivePrompt()
             val activeCard = when (activePrompt) {
@@ -1124,6 +1124,22 @@ class ChatHistoryDelegate(
                 reloadCurrentChatDisplayHistory(chatId)
             }
             true
+        }
+    }
+
+    /** Retracts bubbles owned by the active stream without cancelling that same turn. */
+    internal suspend fun retractStreamingMessages(chatId: String, timestamps: List<Long>) {
+        if (timestamps.isEmpty()) return
+
+        // User history mutations cancel generation first. A model revision is part of generation,
+        // so only serialize storage/display changes here; invoking those hooks would cancel itself.
+        historyUpdateMutex.withLock {
+            timestamps.distinct().forEach { timestamp ->
+                chatHistoryManager.deleteMessage(chatId, timestamp)
+            }
+            if (_currentChatId.value == chatId) {
+                reloadCurrentChatDisplayHistory(chatId)
+            }
         }
     }
 

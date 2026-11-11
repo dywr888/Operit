@@ -7,6 +7,7 @@ import com.ai.assistance.operit.core.tools.*
 import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ToolResult
 import com.ai.assistance.operit.core.tools.system.Terminal
+import com.ai.assistance.operit.terminal.SessionInputResult
 import com.ai.assistance.operit.terminal.provider.type.HiddenExecResult
 import com.ai.assistance.operit.terminal.view.domain.ansi.TerminalChar
 import kotlinx.coroutines.*
@@ -121,45 +122,37 @@ class StandardTerminalCommandExecutor(private val context: Context) {
                     )
                 }
 
+                val originalShell = terminal.terminalState.value.sessions.find { it.id == sessionId }?.terminalSession
                 val outputFlow = terminal.executeCommandFlow(sessionId, command)
 
                 if (outputFlow != null) {
                     val events = mutableListOf<String>()
                     var completionOutput: String? = null
-                    var exitCode = 0
-                    var hasCompleted = false
-                    var didTimeout = false
+                    val outcome = TerminalCommandOutcome()
 
                     try {
                         withTimeout(timeout) {
                             outputFlow.collect { event ->
                                 if (event.isCompleted) {
                                     completionOutput = event.outputChunk
+                                    outcome.complete(event)
                                 } else if (event.outputChunk.isNotEmpty()) {
                                     events.add(event.outputChunk)
-                                }
-                                if (event.isCompleted) {
-                                    exitCode = 0
-                                    hasCompleted = true
                                 }
                             }
                         }
                     } catch (e: TimeoutCancellationException) {
                         AppLogger.w(TAG, "Command execution timed out after ${timeout}ms")
                         cancelTimedOutCommand(terminal, sessionId)
-                        hasCompleted = true
-                        exitCode = -1
-                        didTimeout = true
+                        outcome.timeout()
                     }
 
                     val fullOutput = completionOutput?.takeIf { it.isNotEmpty() } ?: events.joinToString("")
-                    AppLogger.d(TAG, "Command output collected: '$fullOutput', exitCode: $exitCode")
-                    val errorMessage =
-                            when {
-                                didTimeout -> null
-                                !hasCompleted -> context.getString(R.string.terminal_error_command_failed)
-                                else -> null
-                            }
+                    AppLogger.d(TAG, "Command output collected: '$fullOutput', exitCode: ${outcome.exitCode}")
+                    val errorMessage = outcome.error(timeout)
+                    val currentShell = terminal.terminalState.value.sessions.find { it.id == sessionId }?.terminalSession
+                    val sessionAlive = !outcome.sessionExited && originalShell != null &&
+                        currentShell === originalShell && originalShell.process.isAlive
 
                     ToolResult(
                             toolName = tool.name,
@@ -167,9 +160,10 @@ class StandardTerminalCommandExecutor(private val context: Context) {
                             result = TerminalCommandResultData(
                                     command = command,
                                     output = fullOutput,
-                                    exitCode = exitCode,
+                                    exitCode = outcome.exitCode,
                                     sessionId = sessionId,
-                                    timedOut = didTimeout
+                                    timedOut = outcome.timedOut,
+                                    sessionAlive = sessionAlive
                             ),
                             error = errorMessage
                     )
@@ -181,6 +175,8 @@ class StandardTerminalCommandExecutor(private val context: Context) {
                         error = context.getString(R.string.terminal_error_command_failed)
                     )
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 AppLogger.e(TAG, "执行终端命令时出错", e)
                 ToolResult(
@@ -249,12 +245,11 @@ class StandardTerminalCommandExecutor(private val context: Context) {
                 )
             )
 
+            val originalShell = terminal.terminalState.value.sessions.find { it.id == sessionId }?.terminalSession
             val outputFlow = terminal.executeCommandFlow(sessionId, command)
             val events = mutableListOf<String>()
             var completionOutput: String? = null
-            var exitCode = 0
-            var hasCompleted = false
-            var didTimeout = false
+            val outcome = TerminalCommandOutcome()
             var chunkIndex = 0
             var receivedChars = 0
 
@@ -263,8 +258,7 @@ class StandardTerminalCommandExecutor(private val context: Context) {
                     outputFlow.collect { event ->
                         if (event.isCompleted) {
                             completionOutput = event.outputChunk
-                            exitCode = 0
-                            hasCompleted = true
+                            outcome.complete(event)
                             return@collect
                         }
 
@@ -297,18 +291,14 @@ class StandardTerminalCommandExecutor(private val context: Context) {
             } catch (e: TimeoutCancellationException) {
                 AppLogger.w(TAG, "Command execution timed out after ${timeout}ms")
                 cancelTimedOutCommand(terminal, sessionId)
-                hasCompleted = true
-                exitCode = -1
-                didTimeout = true
+                outcome.timeout()
             }
 
             val fullOutput = completionOutput?.takeIf { it.isNotEmpty() } ?: events.joinToString("")
-            val errorMessage =
-                when {
-                    didTimeout -> null
-                    !hasCompleted -> context.getString(R.string.terminal_error_command_failed)
-                    else -> null
-                }
+            val errorMessage = outcome.error(timeout)
+            val currentShell = terminal.terminalState.value.sessions.find { it.id == sessionId }?.terminalSession
+            val sessionAlive = !outcome.sessionExited && originalShell != null &&
+                currentShell === originalShell && originalShell.process.isAlive
 
             emit(
                 ToolResult(
@@ -318,13 +308,16 @@ class StandardTerminalCommandExecutor(private val context: Context) {
                         TerminalCommandResultData(
                             command = command,
                             output = fullOutput,
-                            exitCode = exitCode,
+                            exitCode = outcome.exitCode,
                             sessionId = sessionId,
-                            timedOut = didTimeout
+                            timedOut = outcome.timedOut,
+                            sessionAlive = sessionAlive
                         ),
                     error = errorMessage
                 )
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             AppLogger.e(TAG, "流式执行终端命令时出错", e)
             emit(
@@ -377,12 +370,13 @@ class StandardTerminalCommandExecutor(private val context: Context) {
                 val didTimeout = hiddenResult.state == HiddenExecResult.State.TIMEOUT
                 val errorMessage =
                     when {
-                        didTimeout -> null
+                        didTimeout -> "Command timed out after ${timeoutMs}ms"
                         !hiddenResult.isOk ->
                             context.getString(
                                 R.string.terminal_error_execute_hidden_command,
                                 buildHiddenExecFailureDetail(hiddenResult)
                             )
+                        hiddenResult.exitCode != 0 -> "Command exited with code ${hiddenResult.exitCode}"
                         else -> null
                     }
 
@@ -474,8 +468,7 @@ class StandardTerminalCommandExecutor(private val context: Context) {
                             acceptedChars
                         )
                     )
-                )
-            } catch (e: IllegalArgumentException) {
+                )            } catch (e: IllegalArgumentException) {
                 ToolResult(
                     toolName = tool.name,
                     success = false,
@@ -603,7 +596,14 @@ class StandardTerminalCommandExecutor(private val context: Context) {
     }
 
     private suspend fun cancelTimedOutCommand(terminal: Terminal, sessionId: String) {
-        terminal.sendInterruptSignal(sessionId)
+        val interruptResult = terminal.sendInterruptSignal(sessionId)
+        if (interruptResult != SessionInputResult.DELIVERED) {
+            AppLogger.w(
+                TAG,
+                "Timed-out command cancellation could not interrupt session $sessionId: $interruptResult"
+            )
+            return
+        }
         val settled =
             withTimeoutOrNull(COMMAND_CANCEL_SETTLE_TIMEOUT_MS) {
                 terminal.terminalState.first { state ->
@@ -656,7 +656,7 @@ class StandardTerminalCommandExecutor(private val context: Context) {
         }
     }
 
-    private fun applyTerminalInput(
+    private suspend fun applyTerminalInput(
         terminal: Terminal,
         sessionId: String,
         hasInput: Boolean,
@@ -665,7 +665,7 @@ class StandardTerminalCommandExecutor(private val context: Context) {
     ): Int {
         if (control == null) {
             if (hasInput && input.isNotEmpty()) {
-                terminal.sendInput(sessionId, input)
+                requireInputDelivered(terminal.sendInput(sessionId, input), sessionId)
             }
             return if (hasInput) input.length else 0
         }
@@ -678,17 +678,26 @@ class StandardTerminalCommandExecutor(private val context: Context) {
             ?: throw IllegalArgumentException(context.getString(R.string.terminal_error_unsupported_control, control))
 
         if (hasInput && input.isNotEmpty()) {
-            terminal.sendInput(sessionId, input)
+            requireInputDelivered(terminal.sendInput(sessionId, input), sessionId)
         }
-        terminal.sendInput(sessionId, controlSequence)
+        requireInputDelivered(terminal.sendInput(sessionId, controlSequence), sessionId)
         return (if (hasInput) input.length else 0) + controlSequence.length
+    }
+
+    /**
+     * 输入没有真正写进目标会话时上报失败，避免工具报告“已写入”而实际什么都没发生。
+     */
+    private fun requireInputDelivered(result: SessionInputResult, sessionId: String) {
+        if (result != SessionInputResult.DELIVERED) {
+            throw IllegalStateException("session $sessionId: $result")
+        }
     }
 
     private fun isModifierControl(control: String): Boolean {
         return control == "ctrl" || control == "control" || control == "alt" || control == "shift" || control == "meta" || control == "cmd"
     }
 
-    private fun applyModifierControl(
+    private suspend fun applyModifierControl(
         terminal: Terminal,
         sessionId: String,
         control: String,
@@ -703,26 +712,26 @@ class StandardTerminalCommandExecutor(private val context: Context) {
             "ctrl", "control" -> applyCtrlCombination(terminal, sessionId, input)
             "alt", "meta", "cmd" -> {
                 val payload = "\u001b$input"
-                terminal.sendInput(sessionId, payload)
+                requireInputDelivered(terminal.sendInput(sessionId, payload), sessionId)
                 payload.length
             }
             "shift" -> {
                 val payload = input.uppercase()
-                terminal.sendInput(sessionId, payload)
+                requireInputDelivered(terminal.sendInput(sessionId, payload), sessionId)
                 payload.length
             }
             else -> throw IllegalArgumentException(context.getString(R.string.terminal_error_unsupported_control, control))
         }
     }
 
-    private fun applyCtrlCombination(terminal: Terminal, sessionId: String, input: String): Int {
+    private suspend fun applyCtrlCombination(terminal: Terminal, sessionId: String, input: String): Int {
         if (input.length != 1) {
             throw IllegalArgumentException(context.getString(R.string.terminal_error_ctrl_input_single_char))
         }
 
         val value = input[0]
         if (value.equals('c', ignoreCase = true)) {
-            terminal.sendInterruptSignal(sessionId)
+            requireInputDelivered(terminal.sendInterruptSignal(sessionId), sessionId)
             return 1
         }
 
@@ -745,7 +754,7 @@ class StandardTerminalCommandExecutor(private val context: Context) {
                     )
             }
 
-        terminal.sendInput(sessionId, code.toChar().toString())
+        requireInputDelivered(terminal.sendInput(sessionId, code.toChar().toString()), sessionId)
         return 1
     }
 

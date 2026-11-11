@@ -3042,6 +3042,7 @@ Sekarang Anda dapat menggunakan mode AutoGLM di antarmuka percakapan.</string>
     <string name="chat_create_dedicated_terminal_session_failed">Tidak dapat membuat sesi terminal khusus</string>
     <string name="chat_create_workspace_terminal_session_failed">Tidak dapat membuat sesi terminal ruang kerja</string>
     <string name="chat_execute_command_failed">Eksekusi perintah gagal: %1$s</string>
+    <string name="chat_execute_command_cancel_failed">Tidak dapat membatalkan perintah: sesi terminal tujuan sudah ditutup atau belum siap</string>
     <string name="workspace_command_already_running">Sudah ada perintah ruang kerja yang sedang berjalan</string>
     <string name="workspace_command_running">Perintah sedang berjalan</string>
     <string name="workspace_command_cancelling">Membatalkan perintah...</string>
@@ -6030,6 +6031,7 @@ Sekarang Anda dapat menggunakan mode AutoGLM di antarmuka percakapan.</string>
     <string name="gemini_error_cannot_connect">Tidak dapat terhubung ke server, periksa koneksi jaringan atau apakah alamat API benar</string>
     <string name="gemini_error_max_retries">Gagal mendapatkan respons AI, telah mencapai jumlah percobaan ulang maksimum: %1$s</string>
     <string name="gemini_error_response_failed">Gagal mendapatkan respons AI: %1$s</string>
+    <string name="gemini_error_empty_contents">Tidak ada konten pesan untuk dikirim: riwayat percakapan kosong atau hanya berisi teks pemikiran</string>
     <string name="gemini_error_connection_timeout">Koneksi timeout atau terputus, telah dicoba ulang %1$d kali: %2$s</string>
     <string name="gemini_connection_success">Koneksi berhasil!</string>
     <string name="gemini_connection_test_failed">Tes koneksi gagal: %1$s</string>
@@ -7572,9 +7574,8 @@ Sekarang Anda dapat menggunakan mode AutoGLM di antarmuka percakapan.</string>
     <string name="github_login_method_external">Masuk dengan browser eksternal</string>
     <string name="github_login_starting">Menyiapkan otorisasi GitHub…</string>
     <string name="artifact_publish_toolpkg_version_readonly">Versi rilis ToolPkg berasal dari manifest dalam paket, tidak dapat dimodifikasi secara manual sebelum rilis</string>
-    <string name="market_version_incompatible_title">Tidak dapat mengunduh: versi klien tidak didukung</string>
-    <string name="market_version_too_low_message">Versi klien saat ini %1$s lebih rendah dari versi minimum yang diperlukan %2$s. Silakan perbarui klien sebelum mengunduh.</string>
-    <string name="market_version_too_high_message">Versi klien saat ini %1$s lebih tinggi dari versi maksimum yang didukung %2$s. Gunakan versi klien yang didukung.</string>
+    <string name="market_toolpkg_api_incompatible_title">Tidak dapat menginstal: API ToolPkg tidak didukung</string>
+    <string name="market_toolpkg_api_incompatible_message">Plugin ini mendeklarasikan API ToolPkg %1$s. Perangkat ini mendukung %2$s, sehingga plugin ini tidak dapat diinstal.</string>
     <string name="external_http_chat_a2a_title">Antarmuka Agen A2A</string>
     <string name="external_http_chat_a2a_desc">Menyediakan layanan A2A 1.0 JSON-RPC menggunakan port pendengar dan Bearer Token yang sama. Berikan alamat Agent Card ke klien A2A untuk ditemukan terlebih dahulu.</string>
     <string name="external_http_chat_a2a_agent_card">Alamat Agent Card</string>

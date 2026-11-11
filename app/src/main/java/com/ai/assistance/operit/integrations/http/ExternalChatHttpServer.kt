@@ -15,6 +15,8 @@ import com.ai.assistance.operit.integrations.externalchat.ExternalChatStreamEnve
 import com.ai.assistance.operit.integrations.externalchat.ExternalChatStreamingStartResult
 import com.ai.assistance.operit.data.model.InputProcessingState
 import com.ai.assistance.operit.util.AppLogger
+import com.ai.assistance.operit.util.ChatTrace
+import com.ai.assistance.operit.util.stream.collectRevisionAppliedText
 import fi.iki.elonen.NanoHTTPD
 import java.io.BufferedWriter
 import java.io.FilterInputStream
@@ -250,109 +252,119 @@ class ExternalChatHttpServer(
 
         val streamJob: Job =
             serviceScope.launch(Dispatchers.IO) {
-                pipeOutput.bufferedWriter(StandardCharsets.UTF_8).use { writer ->
-                    try {
-                        when (
-                            val startResult =
-                                executor.startStreaming(request.toExecutionRequest(resolvedRequestId))
-                        ) {
-                            is ExternalChatStreamingStartResult.Failed -> {
-                                writeSseEvent(
-                                    writer,
-                                    startResult.result.toStreamEnvelope(
-                                        event = STREAM_EVENT_ERROR,
-                                        fallbackRequestId = resolvedRequestId
-                                    )
-                                )
-                            }
-
-                            is ExternalChatStreamingStartResult.Started -> {
-                                val streamSession = startResult.session
-                                streamingSessionRef.set(streamSession)
-                                writeSseEvent(
-                                    writer,
-                                    ExternalChatStreamEnvelope(
-                                        event = STREAM_EVENT_START,
-                                        requestId = streamSession.requestId,
-                                        chatId = streamSession.chatId
-                                    )
-                                )
-
-                                val filteredResponseStream =
-                                    ExternalChatResponseSanitizer.sanitizeStream(
-                                        streamSession.responseStreamSession.responseStream,
-                                        request.returnToolStatus
-                                    )
-                                val finalResponse = StringBuilder()
-                                filteredResponseStream.collect { chunk ->
-                                    if (chunk.isEmpty()) {
-                                        return@collect
-                                    }
-                                    finalResponse.append(chunk)
-                                    writeSseEvent(
-                                        writer,
-                                        ExternalChatStreamEnvelope(
-                                            event = STREAM_EVENT_DELTA,
-                                            requestId = streamSession.requestId,
-                                            chatId = streamSession.chatId,
-                                            delta = chunk
-                                        )
-                                    )
-                                }
-
-                                val finalState = streamSession.responseStreamSession.currentState()
-                                val finalResponseText = finalResponse.toString().takeIf { it.isNotBlank() }
-                                if (finalState is InputProcessingState.Error) {
-                                    writeSseEvent(
-                                        writer,
-                                        ExternalChatStreamEnvelope(
-                                            event = STREAM_EVENT_ERROR,
-                                            requestId = streamSession.requestId,
-                                            chatId = streamSession.chatId,
-                                            aiResponse = finalResponseText,
-                                            success = false,
-                                            error = finalState.message
-                                        )
-                                    )
-                                } else {
-                                    writeSseEvent(
-                                        writer,
-                                        ExternalChatStreamEnvelope(
-                                            event = STREAM_EVENT_DONE,
-                                            requestId = streamSession.requestId,
-                                            chatId = streamSession.chatId,
-                                            aiResponse = finalResponseText,
-                                            success = true
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    } catch (e: CancellationException) {
-                        streamingSessionRef.get()?.responseStreamSession?.cancel()
-                        throw e
-                    } catch (e: IOException) {
-                        AppLogger.i(TAG, "SSE client disconnected: requestId=$resolvedRequestId")
-                        streamingSessionRef.get()?.responseStreamSession?.cancel()
-                    } catch (e: Exception) {
-                        AppLogger.e(TAG, "SSE stream failed: requestId=$resolvedRequestId", e)
-                        val streamSession = streamingSessionRef.get()
-                        runCatching {
+                val writer = pipeOutput.bufferedWriter(StandardCharsets.UTF_8)
+                try {
+                    when (
+                        val startResult =
+                            executor.startStreaming(request.toExecutionRequest(resolvedRequestId))
+                    ) {
+                        is ExternalChatStreamingStartResult.Failed -> {
                             writeSseEvent(
                                 writer,
-                                ExternalChatStreamEnvelope(
+                                startResult.result.toStreamEnvelope(
                                     event = STREAM_EVENT_ERROR,
-                                    requestId = streamSession?.requestId ?: resolvedRequestId,
-                                    chatId = streamSession?.chatId,
-                                    success = false,
-                                    error = e.message ?: "Unknown error"
+                                    fallbackRequestId = resolvedRequestId
                                 )
                             )
                         }
-                        streamSession?.responseStreamSession?.cancel()
-                    } finally {
-                        streamingSessionRef.get()?.cleanup()
+
+                        is ExternalChatStreamingStartResult.Started -> {
+                            val streamSession = startResult.session
+                            streamingSessionRef.set(streamSession)
+                            writeSseEvent(
+                                writer,
+                                ExternalChatStreamEnvelope(
+                                    event = STREAM_EVENT_START,
+                                    requestId = streamSession.requestId,
+                                    chatId = streamSession.chatId
+                                )
+                            )
+
+                            val filteredResponseStream =
+                                ExternalChatResponseSanitizer.sanitizeStream(
+                                    streamSession.responseStreamSession.responseStream,
+                                    request.returnToolStatus
+                                )
+                            filteredResponseStream.collect { chunk ->
+                                if (chunk.isEmpty()) {
+                                    return@collect
+                                }
+                                writeSseEvent(
+                                    writer,
+                                    ExternalChatStreamEnvelope(
+                                        event = STREAM_EVENT_DELTA,
+                                        requestId = streamSession.requestId,
+                                        chatId = streamSession.chatId,
+                                        delta = chunk
+                                    )
+                                )
+                            }
+
+                            // An SSE delta cannot be retracted, so a discarded attempt may
+                            // already have been published above when the provider retried.
+                            // The terminal payload is what clients persist, and it must come
+                            // from the recorded revision history of the complete response
+                            // rather than from the concatenation of the forwarded deltas.
+                            val authoritativeResponse =
+                                streamSession.responseStreamSession.responseStream
+                                    .collectRevisionAppliedText()
+                            val finalState = streamSession.responseStreamSession.currentState()
+                            val finalResponseText =
+                                ExternalChatResponseSanitizer.sanitize(
+                                    authoritativeResponse,
+                                    request.returnToolStatus
+                                )
+                            if (finalState is InputProcessingState.Error) {
+                                writeSseEvent(
+                                    writer,
+                                    ExternalChatStreamEnvelope(
+                                        event = STREAM_EVENT_ERROR,
+                                        requestId = streamSession.requestId,
+                                        chatId = streamSession.chatId,
+                                        aiResponse = finalResponseText,
+                                        success = false,
+                                        error = finalState.message
+                                    )
+                                )
+                            } else {
+                                writeSseEvent(
+                                    writer,
+                                    ExternalChatStreamEnvelope(
+                                        event = STREAM_EVENT_DONE,
+                                        requestId = streamSession.requestId,
+                                        chatId = streamSession.chatId,
+                                        aiResponse = finalResponseText,
+                                        success = true
+                                    )
+                                )
+                            }
+                        }
                     }
+                } catch (e: CancellationException) {
+                    streamingSessionRef.get()?.responseStreamSession?.cancel()
+                    throw e
+                } catch (e: IOException) {
+                    AppLogger.i(TAG, "SSE client disconnected: requestId=$resolvedRequestId")
+                    streamingSessionRef.get()?.responseStreamSession?.cancel()
+                } catch (e: Exception) {
+                    AppLogger.e(TAG, "SSE stream failed: requestId=$resolvedRequestId", e)
+                    val streamSession = streamingSessionRef.get()
+                    runCatching {
+                        writeSseEvent(
+                            writer,
+                            ExternalChatStreamEnvelope(
+                                event = STREAM_EVENT_ERROR,
+                                requestId = streamSession?.requestId ?: resolvedRequestId,
+                                chatId = streamSession?.chatId,
+                                success = false,
+                                error = e.message ?: "Unknown error"
+                            )
+                        )
+                    }
+                    streamSession?.responseStreamSession?.cancel()
+                } finally {
+                    streamingSessionRef.get()?.cleanup()
+                    closeSseWriter(writer, "requestId=$resolvedRequestId")
                 }
             }
 
@@ -442,18 +454,8 @@ class ExternalChatHttpServer(
                 return RequestBodyResult(error = "Unsupported Content-Length: $contentLength")
             }
             if (contentLength == 0L) {
+                AppLogger.d(TAG, "readRequestBody empty body")
                 return RequestBodyResult(body = "")
-            }
-
-            val bodyBytes = ByteArray(contentLength.toInt())
-            var offset = 0
-            val inputStream = session.inputStream
-            while (offset < bodyBytes.size) {
-                val read = inputStream.read(bodyBytes, offset, bodyBytes.size - offset)
-                if (read < 0) {
-                    return RequestBodyResult(error = "Unexpected end of stream while reading request body")
-                }
-                offset += read
             }
 
             val charset = resolveRequestCharset(
@@ -461,7 +463,12 @@ class ExternalChatHttpServer(
                     it.key.equals("content-type", ignoreCase = true)
                 }?.value
             )
-            RequestBodyResult(body = String(bodyBytes, charset))
+            val body = ExternalChatRequestBodyReader.read(session.inputStream, contentLength, charset)
+            AppLogger.d(
+                TAG,
+                "readRequestBody declaredBytes=$contentLength charset=${charset.name()} ${ChatTrace.describe(body, byteLength = body.toByteArray(charset).size)}"
+            )
+            RequestBodyResult(body = body)
         } catch (e: Exception) {
             AppLogger.e(TAG, "Failed to read HTTP request body", e)
             RequestBodyResult(error = "Failed to read request body: ${e.message ?: "Unknown error"}")

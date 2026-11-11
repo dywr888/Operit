@@ -3347,6 +3347,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="chat_create_dedicated_terminal_session_failed">Nu se poate crea o sesiune de terminal independentă</string>
     <string name="chat_create_workspace_terminal_session_failed">Nu se poate crea o sesiune de terminal în spațiul de lucru</string>
     <string name="chat_execute_command_failed">Executarea comenzii a eșuat: %1$s</string>
+    <string name="chat_execute_command_cancel_failed">Comanda nu poate fi anulată: sesiunea de terminal țintă este închisă sau nu este pregătită</string>
     <string name="workspace_command_already_running">O comandă din spațiul de lucru existent este în curs de execuție</string>
     <string name="workspace_command_running">Comanda este în curs de execuție</string>
     <string name="workspace_command_cancelling">Se anulează comanda...</string>
@@ -7003,6 +7004,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="gemini_error_cannot_connect">Nu se poate stabili conexiunea cu serverul. Vă rugăm să verificați conexiunea la internet sauAPIAdresa este corectă?</string>
     <string name="gemini_error_max_retries">AIEșecul solicitării; s-a atins numărul maxim de încercări: %1$s</string>
     <string name="gemini_error_response_failed">AIEșec la preluarea răspunsului: %1$s</string>
+    <string name="gemini_error_empty_contents">Nu există conținut de mesaj de trimis: istoricul conversației este gol sau conține doar text de gândire</string>
     <string name="gemini_error_connection_timeout">Timpul de așteptare pentru conexiune a expirat sau conexiunea a fost întreruptă; s-a încercat din nou %1$d a doua oară: %2$s</string>
     <string name="gemini_connection_success">Conectarea s-a realizat cu succes!</string>
     <string name="gemini_connection_test_failed">Testul de conexiune a eșuat: %1$s</string>
@@ -8167,9 +8169,8 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="github_login_method_external">Autentificați-vă cu browserul extern</string>
     <string name="github_login_starting">Se pregătește autorizarea GitHub…</string>
     <string name="artifact_publish_toolpkg_version_readonly">Versiunea de publicare ToolPkg provine din manifestul pachetului și nu poate fi modificată manual înainte de publicare</string>
-    <string name="market_version_incompatible_title">Nu se poate descărca: versiunea clientului nu este acceptată</string>
-    <string name="market_version_too_low_message">Versiunea curentă a clientului %1$s este mai mică decât versiunea minimă cerută de resursă, %2$s. Vă rugăm să actualizați clientul înainte de descărcare.</string>
-    <string name="market_version_too_high_message">Versiunea curentă a clientului %1$s este mai mare decât versiunea maximă acceptată de resursă, %2$s. Vă rugăm să utilizați o versiune de client acceptată.</string>
+    <string name="market_toolpkg_api_incompatible_title">Nu se poate instala: API ToolPkg nu este acceptată</string>
+    <string name="market_toolpkg_api_incompatible_message">Acest plugin declară API ToolPkg %1$s. Acest dispozitiv acceptă %2$s, deci pluginul nu poate fi instalat.</string>
     <string name="external_http_chat_a2a_title">Interfață A2A Agent</string>
     <string name="external_http_chat_a2a_desc">Furnizează serviciul A2A 1.0 JSON-RPC folosind același port de ascultare și același Bearer Token. În primul rând, oferiți adresa Agent Card clientului A2A pentru descoperire.</string>
     <string name="external_http_chat_a2a_agent_card">Adresă Agent Card</string>
